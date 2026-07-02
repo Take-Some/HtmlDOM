@@ -1,0 +1,5 @@
+@import url('nested/relative.css');
+
+.root-import {
+    color: #010203;
+}

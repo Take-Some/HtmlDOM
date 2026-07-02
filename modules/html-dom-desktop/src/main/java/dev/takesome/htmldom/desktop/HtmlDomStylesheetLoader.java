@@ -2,25 +2,22 @@ package dev.takesome.htmldom.desktop;
 
 import dev.takesome.htmldom.css.UiCssParser;
 import dev.takesome.htmldom.css.UiStylesheet;
+import dev.takesome.htmldom.desktop.resource.HtmlDomResourceBundle;
+import dev.takesome.htmldom.desktop.resource.HtmlDomResourceKind;
+import dev.takesome.htmldom.desktop.resource.HtmlDomResourceResolver;
 import dev.takesome.htmldom.dom.UiDomDocument;
 import dev.takesome.htmldom.dom.UiDomElement;
 import dev.takesome.htmldom.dom.UiDomTraversal;
 import dev.takesome.htmldom.logging.HtmlDomLog;
 import dev.takesome.htmldom.logging.HtmlDomLogger;
-import dev.takesome.htmldom.desktop.resource.HtmlDomResourceBundle;
-import dev.takesome.htmldom.desktop.resource.HtmlDomResourceKind;
-import dev.takesome.htmldom.desktop.resource.HtmlDomResourceResolver;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 
 /** Resolves author styles from constructor CSS, <style> blocks and <link rel="stylesheet"> tags. */
 final class HtmlDomStylesheetLoader {
     private static final HtmlDomLogger LOG = HtmlDomLog.logger(HtmlDomStylesheetLoader.class);
+    private static final int MAX_IMPORT_DEPTH = 32;
     private final UiCssParser parser = new UiCssParser();
     private final ClassLoader classLoader;
 
@@ -101,7 +98,10 @@ final class HtmlDomStylesheetLoader {
     private UiStylesheet parseChunk(String kind, String name, String css, String urlBase, HtmlDomResourceResolver resolver) {
         String safeName = name == null || name.isBlank() ? "<inline>" : name;
         long started = System.nanoTime();
-        String normalizedCss = resolveCssUrls(css == null ? "" : css, urlBase, resolver);
+        LinkedHashSet<String> importStack = new LinkedHashSet<>();
+        String rootKey = normalizePath(safeName);
+        if (!rootKey.isBlank()) importStack.add(rootKey);
+        String normalizedCss = expandCssImports(css == null ? "" : css, safeName, urlBase, resolver, importStack, 0);
         try {
             UiStylesheet parsed = parser.parse(normalizedCss);
             LOG.info("UI CSS parsed kind='{}' source='{}' chars={} rules={} fontFaces={} keyframes={} elapsedMs={}",
@@ -112,12 +112,177 @@ final class HtmlDomStylesheetLoader {
                     parsed.fontFaces().size(),
                     parsed.keyframes().size(),
                     elapsedMs(started));
-            warnAboutUnsupportedImports(kind, safeName, normalizedCss);
             return parsed;
         } catch (RuntimeException error) {
             LOG.error("UI CSS parse failed kind='{}' source='{}' chars={}", error, kind, safeName, normalizedCss.length());
             return UiStylesheet.empty();
         }
+    }
+
+    private String expandCssImports(String css, String sourceName, String base, HtmlDomResourceResolver resolver, LinkedHashSet<String> importStack, int depth) {
+        String source = sourceName == null || sourceName.isBlank() ? "<inline>" : sourceName;
+        String safeCss = css == null ? "" : css;
+        if (safeCss.isBlank()) return "";
+        if (!safeCss.toLowerCase(Locale.ROOT).contains("@import")) return resolveCssUrls(safeCss, base, resolver);
+        if (depth >= MAX_IMPORT_DEPTH) {
+            LOG.warn("UI CSS @import max depth reached source='{}' base='{}' depth={}", source, base, depth);
+            return resolveCssUrls(safeCss, base, resolver);
+        }
+
+        StringBuilder out = new StringBuilder(safeCss.length() + 128);
+        int index = 0;
+        while (index < safeCss.length()) {
+            ImportDirective directive = nextImport(safeCss, index);
+            if (directive == null) {
+                out.append(resolveCssUrls(safeCss.substring(index), base, resolver));
+                break;
+            }
+
+            out.append(resolveCssUrls(safeCss.substring(index, directive.start()), base, resolver));
+            if (!importMediaAccepted(directive.media())) {
+                LOG.debug("UI CSS @import skipped by media source='{}' href='{}' media='{}'", source, directive.href(), directive.media());
+                index = directive.end();
+                continue;
+            }
+
+            String resolved = resolveImportHref(directive.href(), base);
+            if (resolved.isBlank()) {
+                LOG.warn("UI CSS @import skipped because href is blank source='{}' media='{}'", source, directive.media());
+                index = directive.end();
+                continue;
+            }
+
+            String importKey = normalizePath(resolved);
+            if (importStack.contains(importKey)) {
+                LOG.warn("UI CSS @import cycle skipped source='{}' href='{}' resolved='{}' stack={}", source, directive.href(), resolved, importStack);
+                index = directive.end();
+                continue;
+            }
+
+            String importedCss = readStylesheet(resolved, resolver);
+            if (importedCss == null) {
+                LOG.warn("UI CSS @import failed source='{}' href='{}' resolved='{}'", source, directive.href(), resolved);
+                index = directive.end();
+                continue;
+            }
+
+            String importBase = normalizeBase("", resolved);
+            LOG.info("UI CSS @import expanded source='{}' href='{}' resolved='{}' base='{}' depth={}", source, directive.href(), resolved, importBase, depth + 1);
+            importStack.add(importKey);
+            out.append('\n')
+                    .append(expandCssImports(importedCss, resolved, importBase, resolver, importStack, depth + 1))
+                    .append('\n');
+            importStack.remove(importKey);
+            index = directive.end();
+        }
+        return out.toString();
+    }
+
+    private ImportDirective nextImport(String css, int fromIndex) {
+        int index = Math.max(0, fromIndex);
+        char quote = 0;
+        boolean comment = false;
+        while (css != null && index < css.length()) {
+            char ch = css.charAt(index);
+            if (comment) {
+                if (ch == '*' && index + 1 < css.length() && css.charAt(index + 1) == '/') {
+                    comment = false;
+                    index += 2;
+                } else {
+                    index++;
+                }
+                continue;
+            }
+            if (quote != 0) {
+                if (ch == '\\' && index + 1 < css.length()) {
+                    index += 2;
+                    continue;
+                }
+                if (ch == quote) quote = 0;
+                index++;
+                continue;
+            }
+            if (ch == '/' && index + 1 < css.length() && css.charAt(index + 1) == '*') {
+                comment = true;
+                index += 2;
+                continue;
+            }
+            if (ch == '\'' || ch == '"') {
+                quote = ch;
+                index++;
+                continue;
+            }
+            if (ch == '@' && startsWithIgnoreCase(css, index, "@import") && importKeywordBoundary(css, index + 7)) {
+                ImportDirective directive = parseImportDirective(css, index);
+                if (directive != null) return directive;
+            }
+            index++;
+        }
+        return null;
+    }
+
+    private ImportDirective parseImportDirective(String css, int start) {
+        int statementEnd = findImportStatementEnd(css, start + 7);
+        if (statementEnd < 0) return null;
+        String body = css.substring(start + 7, statementEnd).trim();
+        ImportToken token = parseImportToken(body);
+        if (token == null || token.href().isBlank()) return null;
+        return new ImportDirective(start, statementEnd + 1, token.href(), token.media());
+    }
+
+    private ImportToken parseImportToken(String body) {
+        if (body == null || body.isBlank()) return null;
+        String trimmed = body.trim();
+        if (startsWithIgnoreCase(trimmed, 0, "url(")) {
+            int open = trimmed.indexOf('(');
+            int close = matchingParen(trimmed, open);
+            if (close < 0) return null;
+            return new ImportToken(unquoteCssToken(trimmed.substring(open + 1, close)), trimmed.substring(close + 1).trim());
+        }
+        char first = trimmed.charAt(0);
+        if (first == '\'' || first == '"') {
+            int close = closingQuote(trimmed, 1, first);
+            if (close < 0) return null;
+            return new ImportToken(trimmed.substring(1, close).trim(), trimmed.substring(close + 1).trim());
+        }
+        return null;
+    }
+
+    private int findImportStatementEnd(String css, int fromIndex) {
+        int depth = 0;
+        char quote = 0;
+        boolean comment = false;
+        for (int index = Math.max(0, fromIndex); css != null && index < css.length(); index++) {
+            char ch = css.charAt(index);
+            if (comment) {
+                if (ch == '*' && index + 1 < css.length() && css.charAt(index + 1) == '/') {
+                    comment = false;
+                    index++;
+                }
+                continue;
+            }
+            if (quote != 0) {
+                if (ch == '\\' && index + 1 < css.length()) {
+                    index++;
+                    continue;
+                }
+                if (ch == quote) quote = 0;
+                continue;
+            }
+            if (ch == '/' && index + 1 < css.length() && css.charAt(index + 1) == '*') {
+                comment = true;
+                index++;
+                continue;
+            }
+            if (ch == '\'' || ch == '"') {
+                quote = ch;
+                continue;
+            }
+            if (ch == '(') depth++;
+            if (ch == ')' && depth > 0) depth--;
+            if (ch == ';' && depth == 0) return index;
+        }
+        return -1;
     }
 
     private String resolveCssUrls(String css, String base, HtmlDomResourceResolver resolver) {
@@ -172,20 +337,23 @@ final class HtmlDomStylesheetLoader {
         return absoluteResource;
     }
 
+    private String resolveImportHref(String href, String base) {
+        String cleanHref = normalizePath(stripQueryAndFragment(href));
+        if (cleanHref.isBlank() || unsupportedStylesheetUrl(cleanHref) || fileUrl(cleanHref) || absoluteFilePath(cleanHref)) return cleanHref;
+        if (cleanHref.startsWith("/")) return cleanHref;
+        if (base == null || base.isBlank()) return cleanHref;
+        return normalizePath(base + "/" + cleanHref);
+    }
+
+    private boolean importMediaAccepted(String media) {
+        String normalized = stripImportOptions(media);
+        return normalized.isBlank() || mediaAccepted(normalized);
+    }
+
     private String absoluteResourceUrl(String value) {
         String normalized = normalizePath(value);
         if (normalized.isBlank() || absoluteFilePath(normalized) || normalized.startsWith("/")) return normalized;
         return "/" + stripLeadingSlash(normalized);
-    }
-
-    private boolean resourceExists(String value) {
-        String resource = stripLeadingSlash(stripQueryAndFragment(value));
-        if (resource.isBlank()) return false;
-        try (InputStream stream = classLoader.getResourceAsStream(resource)) {
-            return stream != null;
-        } catch (IOException ignored) {
-            return false;
-        }
     }
 
     private boolean dataUrl(String value) {
@@ -198,17 +366,10 @@ final class HtmlDomStylesheetLoader {
         return normalized.startsWith("//") || normalized.matches("^[A-Za-z]:/.*");
     }
 
-    private void warnAboutUnsupportedImports(String kind, String name, String css) {
-        if (css == null) return;
-        if (css.toLowerCase(Locale.ROOT).contains("@import")) {
-            LOG.warn("UI CSS @import is not expanded yet kind='{}' source='{}'; use <link rel=\"stylesheet\"> for deterministic desktop loading", kind, name);
-        }
-    }
-
     private String readStylesheet(String resolved, HtmlDomResourceResolver resolver) {
         if (resolved == null || resolved.isBlank()) return null;
-        if (externalUrl(resolved)) {
-            LOG.warn("UI CSS external URL is not supported in desktop runtime url='{}'", resolved);
+        if (unsupportedStylesheetUrl(resolved)) {
+            LOG.warn("UI CSS stylesheet URL is not supported in desktop runtime url='{}'", resolved);
             return null;
         }
         return resolver.resolveText(resolved, HtmlDomResourceKind.CSS).orElse(null);
@@ -305,6 +466,98 @@ final class HtmlDomStylesheetLoader {
                 || normalized.startsWith("jar:");
     }
 
+    private boolean unsupportedStylesheetUrl(String value) {
+        String normalized = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        return normalized.startsWith("http://")
+                || normalized.startsWith("https://")
+                || normalized.startsWith("data:")
+                || normalized.startsWith("jar:");
+    }
+
+    private boolean fileUrl(String value) {
+        return value != null && value.trim().toLowerCase(Locale.ROOT).startsWith("file:");
+    }
+
+    private String stripImportOptions(String media) {
+        String value = media == null ? "" : media.trim();
+        while (!value.isBlank()) {
+            String lower = value.toLowerCase(Locale.ROOT);
+            if (lower.startsWith("layer(")) {
+                int close = matchingParen(value, value.indexOf('('));
+                if (close < 0) return value;
+                value = value.substring(close + 1).trim();
+                continue;
+            }
+            if ("layer".equals(lower)) return "";
+            if (lower.startsWith("supports(")) {
+                int close = matchingParen(value, value.indexOf('('));
+                if (close < 0) return value;
+                value = value.substring(close + 1).trim();
+                continue;
+            }
+            return value;
+        }
+        return "";
+    }
+
+    private boolean startsWithIgnoreCase(String source, int offset, String expected) {
+        if (source == null || expected == null || offset < 0 || offset + expected.length() > source.length()) return false;
+        return source.regionMatches(true, offset, expected, 0, expected.length());
+    }
+
+    private boolean importKeywordBoundary(String source, int index) {
+        if (source == null || index >= source.length()) return true;
+        char ch = source.charAt(index);
+        return !Character.isLetterOrDigit(ch) && ch != '-' && ch != '_';
+    }
+
+    private int matchingParen(String source, int open) {
+        if (source == null || open < 0 || open >= source.length() || source.charAt(open) != '(') return -1;
+        int depth = 0;
+        char quote = 0;
+        for (int index = open; index < source.length(); index++) {
+            char ch = source.charAt(index);
+            if (quote != 0) {
+                if (ch == '\\' && index + 1 < source.length()) {
+                    index++;
+                    continue;
+                }
+                if (ch == quote) quote = 0;
+                continue;
+            }
+            if (ch == '\'' || ch == '"') {
+                quote = ch;
+                continue;
+            }
+            if (ch == '(') depth++;
+            if (ch == ')') {
+                depth--;
+                if (depth == 0) return index;
+            }
+        }
+        return -1;
+    }
+
+    private int closingQuote(String source, int fromIndex, char quote) {
+        for (int index = Math.max(0, fromIndex); source != null && index < source.length(); index++) {
+            char ch = source.charAt(index);
+            if (ch == '\\' && index + 1 < source.length()) {
+                index++;
+                continue;
+            }
+            if (ch == quote) return index;
+        }
+        return -1;
+    }
+
+    private String unquoteCssToken(String token) {
+        String value = token == null ? "" : token.trim();
+        if (value.length() >= 2 && ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'")))) {
+            return value.substring(1, value.length() - 1).trim();
+        }
+        return value;
+    }
+
     private long elapsedMs(long startedNanos) {
         return Math.max(0L, (System.nanoTime() - startedNanos) / 1_000_000L);
     }
@@ -331,4 +584,7 @@ final class HtmlDomStylesheetLoader {
         private static LinkDecision loaded() { return new LinkDecision(true, ""); }
         private static LinkDecision skip(String reason) { return new LinkDecision(false, reason == null ? "skipped" : reason); }
     }
+
+    private record ImportDirective(int start, int end, String href, String media) {}
+    private record ImportToken(String href, String media) {}
 }

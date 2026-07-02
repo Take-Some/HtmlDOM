@@ -56,6 +56,12 @@ public final class UiCssStylesheetParser {
                 break;
             }
 
+            int atStatementEnd = semicolonAtRuleEnd(css, index);
+            if (atStatementEnd >= 0) {
+                index = atStatementEnd + 1;
+                continue;
+            }
+
             UiCssBlock block = blocks.nextBlock(css, index);
             if (block == null) {
                 break;
@@ -87,5 +93,31 @@ public final class UiCssStylesheetParser {
         }
 
         return new UiStylesheet(rules, fontFaces, keyframes);
+    }
+
+    private int semicolonAtRuleEnd(String css, int index) {
+        if (css == null || index < 0 || index >= css.length() || css.charAt(index) != '@') return -1;
+        int depth = 0;
+        char quote = 0;
+        for (int i = index; i < css.length(); i++) {
+            char ch = css.charAt(i);
+            if (quote != 0) {
+                if (ch == '\\' && i + 1 < css.length()) {
+                    i++;
+                    continue;
+                }
+                if (ch == quote) quote = 0;
+                continue;
+            }
+            if (ch == '\'' || ch == '"') {
+                quote = ch;
+                continue;
+            }
+            if (ch == '(') depth++;
+            if (ch == ')' && depth > 0) depth--;
+            if (ch == '{' && depth == 0) return -1;
+            if (ch == ';' && depth == 0) return i;
+        }
+        return -1;
     }
 }
