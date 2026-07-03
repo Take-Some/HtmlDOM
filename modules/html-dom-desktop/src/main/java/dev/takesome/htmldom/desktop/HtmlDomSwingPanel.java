@@ -17,6 +17,10 @@ import dev.takesome.htmldom.devtools.HtmlDomDevToolsSnapshot;
 import dev.takesome.htmldom.dom.UiDomDocument;
 import dev.takesome.htmldom.dom.UiDomElement;
 import dev.takesome.htmldom.dom.UiDomTraversal;
+import dev.takesome.htmldom.runtime.HtmlDomAction;
+import dev.takesome.htmldom.runtime.HtmlDomDocument;
+import dev.takesome.htmldom.runtime.HtmlDomHostBridge;
+import dev.takesome.htmldom.runtime.HtmlDomValueBinding;
 import dev.takesome.htmldom.desktop.HtmlDomHitTestEngine.ScrollAxis;
 import dev.takesome.htmldom.desktop.HtmlDomHitTestEngine.ScrollDrag;
 import dev.takesome.htmldom.fonts.HtmlDomFonts;
@@ -65,6 +69,7 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
     private final HtmlDomConfig config;
     private final HtmlDomClient client;
     private final UiDomDocument dom;
+    private final HtmlDomDocument htmlDocument;
     private final UiStylesheet stylesheet;
     private final UiCssCascade cascade = new UiCssCascade();
     private final UiCssLayoutEngine layoutEngine = new UiCssLayoutEngine(UiCssPropertyRegistry.loadBuiltins(), new HtmlDomJava2DTextMeasurer());
@@ -158,14 +163,13 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
         );
         UiMarkupDocument document = new UiMarkupParser().parse(safeMarkup, resolvedSourcePath);
         this.dom = document.dom();
+        this.htmlDocument = new HtmlDomDocument(this.dom);
         HtmlDomResourceBundle defaultResourceBundle = HtmlDomResourceBundle.forDocument(resolvedSourcePath, stylesheetBasePath);
         HtmlDomResourceBundle resourceBundle = this.client.configureResources(resolvedSourcePath, stylesheetBasePath, defaultResourceBundle);
         this.paintEngine = new HtmlDomPaintEngine(HtmlDomSwingPanel.class.getClassLoader(), resolvedSourcePath, stylesheetBasePath);
         logMarkupDiagnostics(document);
         FontAwesomeFonts.register(HtmlDomFonts.registry());
-        this.lua = new HtmlDomLuaRuntime(this.dom);
-        String luaSource = optionalResource("html-dom/bundled/showcase.lua");
-        if (!luaSource.isBlank()) this.lua.execute(luaSource, "showcase.lua");
+        this.lua = new HtmlDomLuaRuntime(this.htmlDocument);
         this.stylesheet = new HtmlDomStylesheetLoader(HtmlDomSwingPanel.class.getClassLoader()).load(this.dom, safeCss, resolvedSourcePath, stylesheetBasePath, resourceBundle);
         setOpaque(true);
         setFocusable(true);
@@ -188,6 +192,34 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
 
     public UiDomDocument document() {
         return dom;
+    }
+
+    public HtmlDomDocument htmlDocument() {
+        return htmlDocument;
+    }
+
+    public HtmlDomSwingPanel bind(String name, HtmlDomValueBinding binding) {
+        htmlDocument.bind(name, binding);
+        return this;
+    }
+
+    public HtmlDomSwingPanel value(String name, Object value) {
+        htmlDocument.value(name, value);
+        return this;
+    }
+
+    public HtmlDomSwingPanel action(String name, HtmlDomAction action) {
+        htmlDocument.action(name, action);
+        return this;
+    }
+
+    public HtmlDomSwingPanel bridge(HtmlDomHostBridge bridge) {
+        htmlDocument.bridge(bridge);
+        return this;
+    }
+
+    public boolean runAction(String actionName) {
+        return lua.dispatchAction(actionName);
     }
 
     public void executeLua(String source, String chunkName) {
@@ -704,6 +736,11 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
                     || current.classList().contains("button");
             if (!actionable) return;
             if (lua.call("onClick", action, current.id())) {
+                domEvent.preventDefault();
+                domEvent.stopPropagation();
+                return;
+            }
+            if (!action.isBlank() && lua.dispatchAction(action, current.id())) {
                 domEvent.preventDefault();
                 domEvent.stopPropagation();
                 return;

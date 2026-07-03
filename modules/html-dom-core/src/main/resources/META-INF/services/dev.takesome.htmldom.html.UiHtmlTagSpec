@@ -30,6 +30,7 @@ dev.takesome.htmldom.html.tags.H6HtmlTag
 dev.takesome.htmldom.html.tags.LabelHtmlTag
 dev.takesome.htmldom.html.tags.DialogHtmlTag
 dev.takesome.htmldom.html.tags.StyleHtmlTag
+dev.takesome.htmldom.html.tags.ScriptHtmlTag
 dev.takesome.htmldom.html.tags.FormHtmlTag
 dev.takesome.htmldom.html.tags.SelectHtmlTag
 dev.takesome.htmldom.html.tags.OptionHtmlTag

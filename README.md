@@ -28,6 +28,7 @@ This is a desktop stack, not browser/WebView: retained DOM, HTML-like markup, CS
 
 - [Architecture overview](docs/architecture.md)
 - [Desktop runtime](docs/desktop-runtime.md)
+- [Desktop Dom entry point](docs/dom-entry-point.md)
 - [CSS, layout and paint pipeline](docs/css-layout-paint.md)
 - [DevTools and runtime editing](docs/devtools.md)
 - [Lua scripting ABI](docs/lua-scripting.md)
@@ -78,7 +79,28 @@ Bundled Lua lives at:
 modules/html-dom-desktop/src/main/resources/html-dom/bundled/showcase.lua
 ```
 
-The Swing panel loads it through `HtmlDomLuaRuntime`; scripts can mutate DOM via the exposed `dom` table.
+The desktop runtime loads scripts through `HtmlDomLuaRuntime`; scripts can mutate DOM through `dom` and interact with document state through `htmldom`.
+
+
+## Desktop Dom entry point
+
+`html-dom-desktop` now exposes a Helix-style, desktop-safe `Dom` facade. It loads markup from classpath or filesystem resources, keeps document-owned `<link rel="stylesheet">` CSS loading in the desktop renderer, installs Lua scripts declared by `<script type="lua">`, and supports neutral runtime values/actions without Minecraft or Forge dependencies.
+
+```java
+HtmlDomSwingPanel panel = Dom.classpath("html-dom/bundled/showcase.ui.html")
+        .resourceBase("html-dom/bundled/")
+        .script("showcase.lua")
+        .value("enabled", true)
+        .action("ui.refresh", event -> event.document().value("lastAction", event.action()))
+        .panel();
+```
+
+Inline markup remains available for tools, tests and embedded desktop shells:
+
+```java
+HtmlDomDocument document = Dom.markup("<html><body><p id=\"status\">Ready</p></body></html>")
+        .document();
+```
 
 ## Build
 

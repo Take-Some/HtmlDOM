@@ -7,7 +7,7 @@ HtmlDom is a desktop HTML-like UI stack. It is not a browser, a WebView wrapper 
 | Module | Responsibility |
 | --- | --- |
 | `html-dom-logging` | Shared logging facade and console logging backend. |
-| `html-dom-core` | DOM model, HTML registry, markup parser, CSS parser, cascade, layout, paint tree metadata and user-agent styles. |
+| `html-dom-core` | DOM model, runtime document wrapper, HTML registry, markup parser, CSS parser, cascade, layout, paint tree metadata and user-agent styles. |
 | `html-dom-fonts` | Font registry and built-in classpath font loading. |
 | `html-dom-icons-fontawesome` | Font Awesome font resources, icon registry and icon class resolution. |
 | `html-dom-scripting-lua` | Lua runtime and DOM bindings. Lua is the scripting layer instead of browser JavaScript. |
@@ -17,16 +17,19 @@ HtmlDom is a desktop HTML-like UI stack. It is not a browser, a WebView wrapper 
 ## Runtime flow
 
 ```text
-HTML-like markup
+Dom.classpath / Dom.file / Dom.markup
+  -> HtmlDomResourceResolver
   -> UiMarkupParser
   -> UiDomDocument
+  -> HtmlDomDocument
+  -> HtmlDomLuaRuntime
   -> UiCssCascade
   -> UiCssLayoutEngine
   -> HtmlDomSwingPanel
   -> Java2D paint phases
 ```
 
-Lua can mutate the retained DOM at runtime. After mutation the panel reapplies cascade/layout and repaints.
+Lua can mutate the retained DOM at runtime. Runtime values and actions are stored in `HtmlDomDocument`; after mutation the panel reapplies cascade/layout and repaints.
 
 ## Paint phases
 
