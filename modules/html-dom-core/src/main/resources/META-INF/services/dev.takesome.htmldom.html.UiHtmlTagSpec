@@ -47,3 +47,4 @@ dev.takesome.htmldom.html.tags.ThHtmlTag
 dev.takesome.htmldom.html.tags.TdHtmlTag
 dev.takesome.htmldom.html.tags.TemplateHtmlTag
 dev.takesome.htmldom.html.tags.BrHtmlTag
+dev.takesome.htmldom.html.tags.AnimationHtmlTag

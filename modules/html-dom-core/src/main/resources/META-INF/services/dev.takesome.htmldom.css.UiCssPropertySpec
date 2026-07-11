@@ -202,3 +202,21 @@ dev.takesome.htmldom.css.properties.layout.ScrollLeftCssProperty
 dev.takesome.htmldom.css.properties.layout.ScrollTopCssProperty
 
 dev.takesome.htmldom.css.properties.text.FontStyleCssProperty
+
+dev.takesome.htmldom.css.properties.paint.MaskCssProperty
+
+dev.takesome.htmldom.css.properties.paint.MaskImageCssProperty
+
+dev.takesome.htmldom.css.properties.paint.MaskModeCssProperty
+
+dev.takesome.htmldom.css.properties.paint.MaskRepeatCssProperty
+
+dev.takesome.htmldom.css.properties.paint.MaskSizeCssProperty
+
+dev.takesome.htmldom.css.properties.paint.MaskPositionCssProperty
+
+dev.takesome.htmldom.css.properties.paint.MaskOpacityCssProperty
+
+dev.takesome.htmldom.css.properties.paint.MaskInvertCssProperty
+
+dev.takesome.htmldom.css.properties.paint.MaskSampleSizeCssProperty

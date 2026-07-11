@@ -5,6 +5,7 @@ public enum HtmlDomResourceKind {
     MARKUP,
     CSS,
     SCRIPT,
+    ENVIRONMENT,
     IMAGE,
     FONT,
     DEVTOOLS,

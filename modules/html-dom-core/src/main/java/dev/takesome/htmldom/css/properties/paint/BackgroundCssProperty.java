@@ -5,6 +5,8 @@ import dev.takesome.htmldom.css.UiCssParseContext;
 import dev.takesome.htmldom.css.UiCssShorthandPropertySpec;
 import dev.takesome.htmldom.css.UiCssShorthandSupport;
 import dev.takesome.htmldom.css.UiCssStringPropertySpec;
+import dev.takesome.htmldom.css.UiCssTokenSplitter;
+import dev.takesome.htmldom.css.UiCssUrlNormalizer;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -20,7 +22,9 @@ public final class BackgroundCssProperty extends UiCssStringPropertySpec impleme
 
     public List<UiCssDeclaration> expand(UiCssParseContext context, String rawValue) {
         ArrayList<UiCssDeclaration> out = new ArrayList<>();
-        List<String> tokens = UiCssShorthandSupport.tokens(rawValue);
+        List<String> layers = UiCssTokenSplitter.splitTopLevelComma(rawValue);
+        String firstLayer = layers.isEmpty() ? rawValue : layers.get(0);
+        List<String> tokens = UiCssShorthandSupport.tokens(firstLayer);
         if (tokens.isEmpty()) return out;
 
         String image = "";
@@ -36,7 +40,9 @@ public final class BackgroundCssProperty extends UiCssStringPropertySpec impleme
                 readingSize = true;
                 continue;
             }
-            if (lower.startsWith("url(") || lower.startsWith("linear-gradient(") || lower.startsWith("radial-gradient(")) {
+            if (lower.startsWith("url(")) {
+                image = UiCssUrlNormalizer.normalizeUrlValue(token);
+            } else if (lower.startsWith("linear-gradient(") || lower.startsWith("radial-gradient(")) {
                 image = token;
             } else if (repeat.isBlank() && REPEAT.contains(lower)) {
                 repeat = token;

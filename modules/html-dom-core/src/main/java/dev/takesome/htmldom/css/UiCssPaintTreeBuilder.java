@@ -61,9 +61,11 @@ public final class UiCssPaintTreeBuilder {
 
     private List<UiCssPaintPhase> phases(UiDomElement element) {
         ArrayList<UiCssPaintPhase> phases = new ArrayList<>();
+        if (hasBoxShadow(element)) phases.add(UiCssPaintPhase.BOX_SHADOW);
         if (hasBackground(element)) phases.add(UiCssPaintPhase.BACKGROUND);
         if (hasBorder(element)) phases.add(UiCssPaintPhase.BORDER);
         phases.add(UiCssPaintPhase.CONTENT);
+        if (hasMask(element)) phases.add(UiCssPaintPhase.MASK);
         if (!element.style("outline", "").isBlank()) phases.add(UiCssPaintPhase.OUTLINE);
         return phases;
     }
@@ -92,6 +94,7 @@ public final class UiCssPaintTreeBuilder {
         if (opacity(element) < 0.999f) return true;
         String transform = element.style("transform", "").trim().toLowerCase(Locale.ROOT);
         if (!transform.isBlank() && !"none".equals(transform)) return true;
+        if (UiCssMaskResolver.resolve(element).active()) return true;
         String mixBlend = element.style("mix-blend-mode", "").trim().toLowerCase(Locale.ROOT);
         return !mixBlend.isBlank() && !"normal".equals(mixBlend);
     }
@@ -118,6 +121,15 @@ public final class UiCssPaintTreeBuilder {
     private boolean scrollContainer(UiDomElement element) {
         String overflow = first(element, "overflow", "overflow-x", "overflow-y").toLowerCase(Locale.ROOT);
         return overflow.equals("hidden") || overflow.equals("clip") || overflow.equals("auto") || overflow.equals("scroll");
+    }
+
+    private boolean hasBoxShadow(UiDomElement element) {
+        String value = element.style("box-shadow", "").trim();
+        return !value.isBlank() && !"none".equalsIgnoreCase(value);
+    }
+
+    private boolean hasMask(UiDomElement element) {
+        return UiCssMaskResolver.resolve(element).active();
     }
 
     private boolean hasBackground(UiDomElement element) {

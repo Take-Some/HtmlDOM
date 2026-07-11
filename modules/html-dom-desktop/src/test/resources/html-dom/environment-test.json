@@ -1,0 +1,12 @@
+{
+  "values": {
+    "source": "classpath",
+    "attempts": 4
+  },
+  "elements": {
+    "status": {
+      "$text": "Environment loaded",
+      "class+": "ready"
+    }
+  }
+}
